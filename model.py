@@ -22,7 +22,48 @@ from sklearn import metrics
 import warnings
 warnings.filterwarnings("ignore")
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
+class ViT(nn.Module):
+    def __init__(self, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, dropout):
+        super().__init__()
+
+        assert image_size % patch_size == 0, "image size must be divisible by the patch size"
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = 3 * patch_size ** 2
+
+        self.patch_embedding = nn.Conv2d(in_channels=3, out_channels=dim, kernel_size=patch_size, stride=patch_size)
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches+1, dim))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        
+        self.transformer = nn.ModuleList([
+            nn.TransformerEncoderLayer(d_model=dim, nhead=heads, dim_feedforward=mlp_dim, dropout=dropout) 
+            for _ in range(depth)
+        ])
+
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+            nn.Linear(dim, num_classes)
+        )
+
+    def forward(self, x):
+        x = self.patch_embedding(x)
+        x = x.flatten(2).permute(0, 2, 1)
+        b, n, c = x.size()
+        
+        cls_tokens = self.cls_token.expand(b, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n+1)]
+        
+        for layer in self.transformer:
+            x = layer(x)
+            
+        x = x.mean(dim=1)
+        x = self.mlp_head(x)
+        
+        return x
 
 
 model = models.vgg19(pretrained = True)
